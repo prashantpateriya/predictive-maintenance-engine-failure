@@ -1,0 +1,133 @@
+name: MLOPs Predictive Maintenance Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# Enable write permissions to allow automatic model commit push operations
+permissions:
+  contents: write
+
+jobs:
+  data_pipeline:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install System Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r predictive_maintenance_project/requirements.txt
+
+    - name: Validate and Register Schema
+      run: |
+        python -c "
+        import pandas as pd, os
+        df = pd.read_csv('predictive_maintenance_project/data/engine_data.csv')
+        expected = ['Engine rpm', 'Lub oil pressure', 'Fuel pressure', 'Coolant pressure', 'lub oil temp', 'Coolant temp', 'Engine Condition']
+        assert all(c in df.columns for c in expected), 'Schema mismatch detected!'
+        print('Schema validation success!')
+        "
+
+    - name: Segment Split & Upload Train-Test Splits
+      run: |
+        python -c "
+        import pandas as pd
+        from sklearn.model_selection import train_test_split
+        df = pd.read_csv('predictive_maintenance_project/data/engine_data.csv')
+        train, test = train_test_split(df, test_size=0.2, random_state=42, stratify=df['Engine Condition'])
+        train.to_csv('train.csv', index=False)
+        test.to_csv('test.csv', index=False)
+        "
+    - name: Upload Train CSV Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: train-artifact
+        path: train.csv
+
+    - name: Upload Test CSV Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-artifact
+        path: test.csv
+
+  model_building:
+    needs: data_pipeline
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install System Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r predictive_maintenance_project/requirements.txt
+
+    - name: Download Train Artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: train-artifact
+
+    - name: Download Test Artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: test-artifact
+
+    - name: Run Grid Tuning Pipeline and Choose Champion Model
+      run: |
+        python -c "
+        import pandas as pd, joblib
+        from sklearn.tree import DecisionTreeClassifier
+        from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier
+        from xgboost import XGBClassifier
+        from sklearn.model_selection import GridSearchCV
+
+        train = pd.read_csv('train.csv')
+        X_train, y_train = train.drop(columns=['Engine Condition']), train['Engine Condition']
+
+        # Sweep across multiple algorithms in alignment with the notebook
+        base_models = {
+            'Decision Tree': DecisionTreeClassifier(random_state=42),
+            'Random Forest': RandomForestClassifier(random_state=42)
+        }
+        tuning_parameters = {
+            'Decision Tree': {'max_depth': [4, 6]},
+            'Random Forest': {'n_estimators': [50], 'max_depth': [6]}
+        }
+
+        best_score = -1
+        champion_model = None
+
+        for name, model in base_models.items():
+            grid = GridSearchCV(model, tuning_parameters[name], cv=3, scoring='f1', n_jobs=-1)
+            grid.fit(X_train, y_train)
+            if grid.best_score_ > best_score:
+                best_score = grid.best_score_
+                champion_model = grid.best_estimator_
+
+        joblib.dump(champion_model, 'predictive_maintenance_project/models/best_predictive_maintenance_model.pkl')
+        print('Champion Model Successfully Optimized and Serialized!')
+        "
+
+    - name: Commit Updated Model to Main Branch
+      run: |
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        git add predictive_maintenance_project/models/best_predictive_maintenance_model.pkl
+        git diff-index --quiet HEAD || git commit -m 'chore: automated update of serialized predictive model [skip ci]'
+        git push
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
