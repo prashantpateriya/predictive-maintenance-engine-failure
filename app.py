@@ -13,10 +13,12 @@ to predict engine failures and determine if proactive maintenance is required.
 """)
 
 # Path to the serialized model file
-model_path = "best_predictive_maintenance_model.pkl"
-if not os.path.exists(model_path):
-    # Fallback path for deployment
-    model_path = "predictive_maintenance_project/models/best_predictive_maintenance_model.pkl"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+model_path = os.path.join(
+    BASE_DIR,
+    "models",
+    "best_predictive_maintenance_model.pkl"
+)
 
 @st.cache_resource
 def load_model(path):
