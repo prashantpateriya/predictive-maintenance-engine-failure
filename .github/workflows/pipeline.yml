@@ -48,13 +48,13 @@ jobs:
         test.to_csv('test.csv', index=False)
         "
     - name: Upload Train CSV Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: train-artifact
         path: train.csv
 
     - name: Upload Test CSV Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: test-artifact
         path: test.csv
@@ -77,12 +77,12 @@ jobs:
         pip install -r predictive_maintenance_project/requirements.txt
 
     - name: Download Train Artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: train-artifact
 
     - name: Download Test Artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: test-artifact
 
